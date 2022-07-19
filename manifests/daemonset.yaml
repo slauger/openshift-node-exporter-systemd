@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app.kubernetes.io/component: exporter
+    app.kubernetes.io/name: node-exporter-systemd
+    app.kubernetes.io/part-of: node-exporter-systemd
+  name: node-exporter-systemd
+  namespace: openshift-monitoring
+spec:
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: exporter
+      app.kubernetes.io/name: node-exporter-systemd
+      app.kubernetes.io/part-of: node-exporter-systemd
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: exporter
+        app.kubernetes.io/name: node-exporter-systemd
+        app.kubernetes.io/part-of: node-exporter-systemd
+    spec:
+      containers:
+      - args:
+        - --web.listen-address=127.0.0.1:9101
+        - --path.sysfs=/host/sys
+        - --path.rootfs=/host/root
+        - --collector.disable-defaults
+        - --collector.systemd
+        image: quay.io/prometheus/node-exporter:v1.3.1
+        imagePullPolicy: IfNotPresent
+        name: node-exporter
+        resources:
+          requests:
+            cpu: 8m
+            memory: 32Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        - mountPath: /host/sys
+          mountPropagation: HostToContainer
+          name: sys
+          readOnly: true
+        - mountPath: /host/root
+          mountPropagation: HostToContainer
+          name: root
+          readOnly: true
+        - mountPath: /var/run/dbus/system_bus_socket
+          mountPropagation: HostToContainer
+          name: system-bus-socket
+          readOnly: true
+      - args:
+        - --logtostderr
+        - --secure-listen-address=[$(IP)]:9101
+        - --tls-cipher-suites=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+        - --upstream=http://127.0.0.1:9101/
+        - --tls-cert-file=/etc/tls/private/tls.crt
+        - --tls-private-key-file=/etc/tls/private/tls.key
+        - --client-ca-file=/etc/tls/client/client-ca.crt
+        env:
+        - name: IP
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: status.podIP
+        # todo: replace with offical one 
+        image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:78ee2a102b008246f499b5dc7ebd0dfd6a0d2eb1cd7578e96ce9fba6509e559c
+        imagePullPolicy: IfNotPresent
+        name: kube-rbac-proxy
+        ports:
+        - containerPort: 9101
+          hostPort: 9101
+          name: https
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 1m
+            memory: 15Mi
+        securityContext:
+          runAsGroup: 65532
+          runAsNonRoot: true
+          runAsUser: 65532
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        - mountPath: /etc/tls/private
+          name: node-exporter-systemd-tls
+        - mountPath: /etc/tls/client
+          name: metrics-client-ca
+      dnsPolicy: ClusterFirst
+      hostNetwork: true
+      hostPID: true
+      nodeSelector:
+        kubernetes.io/os: linux
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: node-exporter
+      serviceAccountName: node-exporter
+      terminationGracePeriodSeconds: 30
+      tolerations:
+      - operator: Exists
+      volumes:
+      - hostPath:
+          path: /sys
+          type: ""
+        name: sys
+      - hostPath:
+          path: /
+          type: ""
+        name: root
+      - hostPath:
+          path: /var/run/dbus/system_bus_socket
+          type: ""
+        name: system-bus-socket
+      - name: node-exporter-tls
+        secret:
+          defaultMode: 420
+          secretName: node-exporter-tls
+      - configMap:
+          defaultMode: 420
+          name: metrics-client-ca
+        name: metrics-client-ca
+  updateStrategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 10%
+    type: RollingUpdate
